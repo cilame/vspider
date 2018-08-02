@@ -59,10 +59,10 @@ class X:
     def __init__(self):
         self.pool = {} # 相同名字只能唯一
     
-    def __lt__(self, content):
+    def __and__(self, content):
         '''
         #=============================================================
-        # 重载 < 方法，作为将 html_content 传入的方法
+        # 重载 & 方法，作为将 html_content 传入的方法
         # 会在此处有二次设置名字的情况
         #
         # 注意：
@@ -93,12 +93,12 @@ class X:
         # 对 @ 进行重载
         #
         # 将其作为一个用 python 自带库获取 url content 的方式
-        # 另外，这个不能与 < 同时使用
+        # 另外，这个不能与 & 同时使用
         # 使用这种方式产生的 content 会直接传入类里面
         # 一切为了更加简化的使用方式
         #
         # @ 是对应 url，用自带的库进行简单的content获取的实现
-        # < 是对应 content，用已经生成的content传入
+        # & 是对应 content，用已经生成的content传入
         #=============================================================
         '''
         try:
@@ -110,7 +110,7 @@ class X:
         if _content_ in local:
             raise "content is already exists. one table_name only use one content in a funciton locals."
 
-        # @ 和 < 的区别就在这里
+        # @ 和 & 的区别就在这里
         def f(str):
             # 这里是对 url里面的query的参数进行quote处理的部分，处理中文输入问题
             def _f(m):
@@ -146,7 +146,7 @@ class X:
         try:
             name = local[_cur_pool_name_]
         except:
-            raise "must be init by 'x<html_content' or 'x(name)' before use <<."
+            raise "must be init by 'x&html_content' or 'x(name)' before use <<."
 
         if self.pool[name][_col_xpath_toggle_]:
             if isinstance(col_xpath_name,(tuple,list)):
@@ -160,6 +160,8 @@ class X:
                 # 多线程调用时只有使用 locals 才不会导致名字设置不安全
                 if _defualt_col_ not in local:
                     local[_defualt_col_] = {}
+
+                if name not in local[_defualt_col_]:
                     local[_defualt_col_][name] = {}
                     local[_defualt_col_][name][_single_col_] = set()
                     
@@ -189,7 +191,7 @@ class X:
         try:
             name = local[_cur_pool_name_]
         except:
-            raise "must be init by 'x<html_content' or 'x(name)' before use <<."
+            raise "must be init by 'x&html_content' or 'x(name)' before use <<."
 
         if self.pool[name][_col_xpath_toggle_]:
             assert isinstance(xpath_node,str),"if you use 'x * xpath_node', this xpath_node must be a str"
@@ -223,7 +225,7 @@ class X:
         try:
             name = local[_cur_pool_name_]
         except:
-            raise "must be init by 'x<html_content' or 'x(name)' before use <<."
+            raise "must be init by 'x&html_content' or 'x(name)' before use <<."
 
         if self.pool[name][_col_xpath_toggle_]:
             node = local[_cur_node_]
@@ -238,6 +240,8 @@ class X:
                 # 多线程调用时只有使用 locals 才不会导致名字设置不安全
                 if _defualt_col_ not in local:
                     local[_defualt_col_] = {}
+
+                if name not in local[_defualt_col_]:
                     local[_defualt_col_][name] = {}
                     local[_defualt_col_][name][_node_col_] = {}
 
@@ -303,7 +307,7 @@ class X:
         func_locals = inspect.stack()[2][0]
         return func_locals.f_locals[_locals_name_]
 
-    def show(self):
+    def test(self):
         # 4 test
         name = self._get_locals()[_cur_pool_name_]
         if self.pool[name][_col_xpath_toggle_]:
@@ -311,10 +315,10 @@ class X:
         print(name)
         print(self.pool)
 
-        # 临时变量 < html_content 和 name 当前使用的池名字
+        # 临时变量 html_content 和 name 当前使用的池名字
         print(self._get_locals())
 
-        # 共享变量 < col_xpath, pool
+        # 共享变量 col_xpath, pool
         for i in self.pool[name][_col_xpath_].items():
             print(i)
 
@@ -351,7 +355,7 @@ class DB:
         p = []
 
         def _up_col_types(i):
-            v = re.findall('_double$|_int$|_integer$|_str$|_string$|_date$',i.lower())
+            v = re.findall('_double_$|_int_$|_integer_$|_str_$|_string_$|_date_$',i.lower())
             if not v:
                 p.append((i,"str"))
             else:
