@@ -183,6 +183,9 @@ class X:
         #=============================================================
         '''
         try:
+            # 使用重复代码也非我的意愿，主要是因为 self._get_locals() 这个函数使用时需要非常小心
+            # 这个函数基于函数栈实现，函数层深度不正常时就会出现问题，所以不如就按照最安全的方式调用即可
+            # 也许是懒得去想？
             name = self._get_locals()[_cur_pool_name_]
         except:
             name = self._set_pool_by_name()
@@ -191,6 +194,18 @@ class X:
         if _content_ in local:
             raise "content is already exists. one table_name only use one content in a funciton locals."
 
+        content = self._get(url)
+        
+        col_xpath  = self.pool[name][_col_xpath_]
+        node_xpath = self.pool[name][_node_xpath_]
+        local[_db_inserter_] = DB(name,content,col_xpath,node_xpath)
+
+    def _get(self,url):
+        '''
+        #=============================================================
+        # url 普通的get方法，有对query参数进行quote处理以简单解决中文问题
+        #=============================================================
+        '''
         def f(str):
             # 这里是对 url里面的query的参数进行quote处理的部分，处理中文输入问题
             def _f(m):
@@ -208,10 +223,8 @@ class X:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.87 Safari/537.36"}
         req = request.Request(v, headers=headers)
         content = request.urlopen(req).read()
-        
-        col_xpath  = self.pool[name][_col_xpath_]
-        node_xpath = self.pool[name][_node_xpath_]
-        local[_db_inserter_] = DB(name,content,col_xpath,node_xpath)
+        return content
+
 
     def __lshift__(self, col_xpath_name):
         '''
@@ -235,6 +248,9 @@ class X:
                 assert len(col_xpath_name) >= 2
                 col   = col_xpath_name[0]
                 xpath = col_xpath_name[1]
+                cobk  = lambda i:i.strip()
+                if len(col_xpath_name) >= 3:
+                    cobk = col_xpath_name[2]
             elif isinstance(col_xpath_name,str):
                 # 如果输入为字符串类型表明用默认的名字
                 # 多线程调用时只有使用 locals 才不会导致名字设置不安全
@@ -252,9 +268,10 @@ class X:
                         break
                 col   = temp
                 xpath = col_xpath_name
+                cobk  = lambda i:i.strip()
 
             if col not in self.pool[name][_col_xpath_]:
-                self.pool[name][_col_xpath_][col] = xpath
+                self.pool[name][_col_xpath_][col] = (xpath,cobk)
 
     def __mul__(self,xpath_node):
         '''
@@ -319,6 +336,9 @@ class X:
                 assert len(col_xpath_name) >= 2
                 col   = col_xpath_name[0]
                 xpath = col_xpath_name[1]
+                cobk  = lambda i:i.strip()
+                if len(col_xpath_name) >= 3:
+                    cobk = col_xpath_name[2]
             elif isinstance(col_xpath_name,str):
                 # 如果输入为字符串类型表明用默认的名字
                 # 多线程调用时只有使用 locals 才不会导致名字设置不安全
@@ -339,9 +359,10 @@ class X:
                         break
                 col   = temp
                 xpath = col_xpath_name
+                cobk  = lambda i:i.strip()
 
             if col not in self.pool[name][_node_xpath_][node]:
-                self.pool[name][_node_xpath_][node][col] = xpath
+                self.pool[name][_node_xpath_][node][col] = (xpath,cobk)
     
 
     def __call__(self,name):
@@ -443,6 +464,10 @@ class DB:
 
         def _up_col_types(i):
             v = re.findall('_double_$|_int_$|_integer_$|_str_$|_string_$|_date_$',i.lower())
+            c = re.findall('^_double_$|^_int_$|^_integer_$|^_str_$|^_string_$|^_date_$',i.lower())
+            if c: c = c[0]
+            assert not c,f"do not only use type_suffix as name, pls add col_name eg. mycol{c}"
+            
             if not v:
                 p.append((i,"str"))
             else:
@@ -476,14 +501,17 @@ class DB:
         def _col_xpath():
             q = []
             for col in self.col_xpath:
-                v = e.xpath(self.col_xpath[col])
+                xpath,cobk = self.col_xpath[col]
+                v = e.xpath(xpath)
                 if v:
                     if isinstance(v,str):
-                        v = v.strip()
+                        v = v
                     else:
-                        v = v[0].strip()
+                        v = v[0]
                     if not v:
                         v = "NULL"
+                    elif cobk:
+                        v = cobk(v)
                 else:
                     v = "NULL"
                 q.append(v.replace('"','""'))
@@ -495,15 +523,17 @@ class DB:
                 for node in e.xpath(node_xpath):
                     q = []
                     for col in self.node_xpath[node_xpath]:
-                        xpath = self.node_xpath[node_xpath][col]
+                        xpath,cobk = self.node_xpath[node_xpath][col]
                         v = node.xpath(xpath)
                         if v:
                             if isinstance(v,str):
-                                v = v.strip()
+                                v = v
                             else:
-                                v = v[0].strip()
+                                v = v[0]
                             if not v:
                                 v = "NULL"
+                            elif cobk:
+                                v = cobk(v)
                         else:
                             v = "NULL"
                         q.append(v.replace('"','""'))

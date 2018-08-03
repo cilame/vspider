@@ -48,14 +48,15 @@ def some(url):
     # 第一种收集方式是以 * 作为节点，** 作为节点下收集的内容地址的配置
     # 适用于 html table 类似的层叠结构数据
     x * '//*[contains(@class,"c-container")]'
-    x ** 'string(./h3/a)'
-    x ** 'string(./h3/a/@href)'
+    x ** ('标题','string(./h3/a)')
+    x ** ('链接','string(./h3/a/@href)')
 
     # 第二种收集方式是以 << 直接作为收集的配置
     # 适用于 html 单个页面只有一组需要收集的数据的场景，目前不支持动态修改配置
     # 配置函数仅第一次配置有效
     x("some2") @ url
-    x << ("test_int_",'string(//*[@id="page"]/strong/span[2])')
+    x << ("test_int_",'string(//*[@id="page"]/strong/span[2])',lambda i:i.strip()[:20])
+
     # 默认都是以字符串形式进行收集的
     # 不过如果你想用不同的方式进行存储可以通过增加自定义名字
     # 在自定义名字后缀加上类型即可实现在数据库中存储的类型改变
@@ -66,6 +67,13 @@ def some(url):
     # _str_
     # _string_
     # _date_
+
+    # 注意：
+    # 使用list或tuple配置收集结构的时候，列名和xpath是必填的
+    # 另外：你不能"只写"以上几种后缀作为名字
+    # ** 和 << 这两个配置函数都可以使用tuple和list传参数，其中如果第三个参数存在
+    # 则将其作为xpath收集到的数据的后续处理函数，处理后的数据才会再插入数据库里面
+    # 默认处理函数为 lambda i:i.strip(), 主动设置为None则什么都不做
 
 for i in range(10):
     url = f"https://www.baidu.com/s?wd=你好&pn={i*10}"
