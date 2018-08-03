@@ -27,9 +27,11 @@ import vspider,vthread
 def some(url):
     print(url)
     x("title_url") @ url
-    x * '//*[contains(@class,"c-container")]'
-    x ** ('title', 'string(./h3/a)')
-    x ** ('url',   'string(./h3/a/@href)')
+    x * '//*[contains(@class,"c-container")]' # * 用xpath语法收集节点，每个节点将会传递给下一级处理
+    x ** ('title', 'string(./h3/a)')          # ** 对每个节点进行当前节点的xpath解析，传入title列
+    x ** ('url',   'string(./h3/a/@href)')    # ** 同上，这里传入url
+    
+    # 解析完所有节点之后，会一次性把该页面所有收集到的数据插入数据库
 
 for i in range(10):
     url = f"https://www.baidu.com/s?wd=你好&pn={i*10}"
