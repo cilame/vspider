@@ -49,6 +49,7 @@ def some(url):
     # 两个配置表名字的中间的所有 col 配置都为前一个表的 col 配置
     # 使用list或tuple配置收集结构的时候，列名和xpath是必填的
 
+
 url = 'http://www.baidu.com/s?wd=翻译'
 for i in range(5):
     some(url)
@@ -69,7 +70,6 @@ for i in range(5):
 
 
 
-
 def some3(url):
     print(url)
     x("真臭") @ url
@@ -83,7 +83,7 @@ def some3(url):
         x << 'string(//*[@id="1"]/h3/a)'
         x << 'string(//*[@id="2"]/h3/a)'
 
-for i in range(2):
+for i in range(5):
     url = f"https://www.baidu.com/s?wd=你好&pn={i*10}"
     some3(url)
 

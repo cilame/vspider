@@ -20,6 +20,7 @@ _import_module = "__main__"
 # 所以这里所有的临时变量名都要前置一个数字
 _locals_name_   = "0_locals_"
 _cur_pool_name_ = "0_pool_name_"
+_cur_filter_    = "0_cur_filter_"
 _db_inserter_   = "0_db_inserter_"
 _content_       = "0_content_"
 _cur_node_      = "0_cur_node_"
@@ -203,6 +204,23 @@ class X:
             name = self._set_pool_by_name()
 
         local = self._get_locals()
+
+        try:
+            filtername = local[_cur_filter_]
+            if type(filtername) != X:
+                filter_pool = self.pool[_filterpool_][filtername]
+            else:
+                filter_pool = None
+        except:
+            raise "get filter pool error."
+
+        # 过滤对象的获取，有则使用，没有则不使用
+        if filter_pool:
+            # 调用过滤对象的方法，如果过滤池里面不存在url则返回url，否则返回空，退出函数
+            url = filter_pool.get_url_by_pool(url)
+            if not url:
+                return
+
         content = self._get(url)
 
         # 将 content 存入 locals ，为了线程安全的 content 复用
@@ -282,6 +300,12 @@ class X:
                 col   = temp
                 xpath = col_xpath_name
                 cobk  = lambda i:i.strip()
+                if xpath.startswith("jsonpath_"):
+                    global jsonpath
+                    from jsonpath import jsonpath
+                else:
+                    global etree
+                    from lxml import etree
 
             if col not in self.pool[name][_col_xpath_]:
                 self.pool[name][_col_xpath_][col] = (xpath,cobk)
@@ -311,17 +335,22 @@ class X:
                 node_func = None
             else:
                 raise "node_callback_function type error. it type must be in (str,list,tuple)"
-            # 如果输入为字符串类型表明用默认的名字
-            # 多线程调用时只有使用 locals 才不会导致名字设置不安全
-            assert xpath_node not in self.pool[name][_node_xpath_],"node cannot be repeat."
+
             if xpath_node.startswith("jsonpath_"):
                 global jsonpath
                 from jsonpath import jsonpath
             else:
                 global etree
                 from lxml import etree
-            self.pool[name][_node_xpath_][(xpath_node,node_func)] = {}
+
             local[_cur_node_] = (xpath_node,node_func)
+            
+            # 如果输入为字符串类型表明用默认的名字
+            # 多线程调用时只有使用 locals 才不会导致名字设置不安全
+            if (xpath_node,node_func) in self.pool[name][_node_xpath_]:
+                return
+            
+            self.pool[name][_node_xpath_][(xpath_node,node_func)] = {}
 
     def __pow__(self,col_xpath_name):
         '''
@@ -394,6 +423,28 @@ class X:
         self._set_pool_by_name(name)
         return self
 
+
+    def __or__(self,filtername):
+        '''
+        #=============================================================
+        # 对 | 进行重载
+        #
+        # 通过名字，添加新的过滤池对象存储在 x 实例里面
+        #=============================================================
+        '''
+        func_locals = inspect.stack()[1][0]
+        if _locals_name_ not in func_locals.f_locals:
+            func_locals.f_locals[_locals_name_] = {}
+
+        if _filterpool_ not in self.pool:
+            self.pool[_filterpool_] = {}
+        if filtername not in self.pool[_filterpool_]:
+            self.pool[_filterpool_][filtername] = filterpool(filtername) if type(filtername) != X else X
+
+        # 设置一个标记，使用后可以关闭当前函数使用过滤池，会关联在 @ 函数里面使用
+        # 若传入的参数类型是 X 那么就会关闭过滤池的使用
+        func_locals.f_locals[_locals_name_][_cur_filter_] = filtername
+
     def _set_pool_by_name(self,name=None):
         '''
         #=============================================================
@@ -405,13 +456,12 @@ class X:
         '''
         if not name:
             name = inspect.stack()[2][3]
-        
+
         if name == "<module>":
             raise "x must be used in a function."
         if name not in self.pool:
             # 池需要根据名字进行唯一化
             self.pool[name] = {}
-            self.pool[name][_filterpool_]       = filterpool(name)
             self.pool[name][_col_xpath_toggle_] = True
             self.pool[name][_col_xpath_]        = {}
             self.pool[name][_db_create_]        = True
@@ -424,6 +474,17 @@ class X:
             func_locals.f_locals[_locals_name_] = {}
         
         func_locals.f_locals[_locals_name_][_cur_pool_name_] = name
+
+        # 一个函数只生成一个过滤池，没有提前配置的话会默认会生成一个函数名字的过滤对象
+        # 这里不直接用 __or__ 是因为 inspect.stack() 的特殊性
+        if _locals_name_ not in func_locals.f_locals[_locals_name_]:
+            filtername = inspect.stack()[2][3]
+            if _filterpool_ not in self.pool:
+                self.pool[_filterpool_] = {}
+            if filtername not in self.pool[_filterpool_]:
+                self.pool[_filterpool_][filtername] = filterpool(filtername)
+            func_locals.f_locals[_locals_name_][_cur_filter_] = filtername
+
         return name
 
     def _get_locals(self):
@@ -499,15 +560,16 @@ class DB:
         for i in self.col_xpath:
             _up_col_types(i)
 
+        f = lambda i:re.sub('_double_$|_int_$|_integer_$|_str_$|_string_$|_date_$','',i)
         if self.node_xpath:
             for node_xpath in self.node_xpath:
                 temp = list(self.node_xpath[node_xpath])
-                if p:
+                if len(p):
                     print(temp,p)
-                    assert temp == list(dict(p))
+                    assert temp == list(map(f,dict(p)))
                     continue
-                for i in temp:
-                    _up_col_types(i)
+                for j in temp:
+                    _up_col_types(j)
 
         return p
 
@@ -547,7 +609,8 @@ class DB:
                     try:
                         v = jsonpath(j,xpath[9:])
                         assert v
-                    except:
+                    except Exception as err:
+                        print(err)
                         raise "jsonpath node loads error. pls check json ajax data."
                     v = _deal_cobk(v,cobk)
                     q.append(v.replace('"','""'))
@@ -579,9 +642,14 @@ class DB:
                         raise "jsonpath node loads error. pls check json ajax data."
                     if node_cobk:
                         next_node = node_cobk(node)
+                    else:
+                        next_node = node
 
                     for i in next_node:
-                        if type(i)==tuple: _node = list(i)
+                        if type(i)==tuple:
+                            _node = list(i)
+                        else:
+                            _node = i
                         q = []
                         for col in self.node_xpath[(node_xpath,node_cobk)]:
                             jpath,cobk = self.node_xpath[(node_xpath,node_cobk)][col]
@@ -624,8 +692,8 @@ class DB:
             try:
                 self.create(col_types)
                 x.pool[self.table_name][_db_create_] = False
-            except Exception as e:
-                print(e)
+            except Exception as err:
+                print(err)
                 raise "create error."
 
         # 插入数据库
@@ -634,9 +702,21 @@ class DB:
         self.conn.close()
 
 class filterpool:
+    '''
+    #=============================================================
+    # 过滤池的对象，默认是函数会自动以函数名字生成一个对象
+    # 可以用 x | filtername 自定义自己要用的过滤对象
+    # 相同名字的过滤池，全局唯一
+    # 初始化时会通过这个对象内的name从数据库中获取url持久化存储的过滤池
+    #=============================================================
+    '''
     def __init__(self, name):
+        # TODO 这里需要考虑线程初始化的情况，如果从数据库里面调用相应的表格内容获取，url过滤池
         self.name = name
-        self.static_pool = None
+
+    def get_url_by_pool(self, url):
+        # TODO 这里要考虑线程安全，要考虑到多线程同时调用这个类实例的函数的情况
+        return url
 
 
 # 池选择器，全局唯一
