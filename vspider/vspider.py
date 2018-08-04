@@ -3,9 +3,11 @@ import inspect
 import threading
 import sqlite3
 import re
+import json
 from urllib import request,parse
 
-from lxml import etree
+# 使用前最好预装 lxml 或 jsonpath
+# 因为目前仅支持这两种解析方式
 
 _import_module = "__main__"
 
@@ -81,7 +83,7 @@ class X:
     #
     #         # 你可以用上面的方法去收集cc,dd两列数据
     #         # 该函数库会在当前脚本路径下生成 x.db 的 sqlite 文件存储数据
-    #         # 上面的脚本会配置以下结构进行数据存储（目前仅支持xpath语法）
+    #         # 上面的脚本会配置以下结构进行数据存储（目前支持xpath语法和jsonpath语法）
     #         # 表名 (默认用函数名字作为表名字)
     #         # +-----+
     #         # |some |
@@ -98,7 +100,7 @@ class X:
     #
     #         # 假如你想用一个名字为table2的表来收集eee的数据
     #         # 那么你完全不需要新开另一个函数，只需在当前上面的结构后面继续配置即可
-    #         # 可以用x(table2)来修改当前配置的表名字
+    #         # 可以用x(table_name)来修改当前配置的表名字
     #         # 然后用 * 配置节点， ** 来配置当前表的收集结构
     #         # ** 配置列的时候可以用tuple或list的第一个参数传入列名
     #         # 特别是你想让数据在存储的时候使用某种类型进行存储
@@ -117,6 +119,10 @@ class X:
     #         # _str_
     #         # _string_
     #         # _date_
+    #
+    #         # 其中，@ 函数每次都会向网页请求一遍数据
+    #         # 如果你想直接使用上一张表 @ 或 & 所得到的 content
+    #         # 你可以直接使用 x(table_name) & x 就可以实现相同的网页不用再多请求一遍了
     #
     #         # 通过名字配置表和列的好处是，如果你在其他函数里面想要-
     #         # 将其他页面的数据传到相同的表里面就只需要配置表名即可
@@ -161,13 +167,21 @@ class X:
         #=============================================================
         '''
         try:
+            # 为了线程安全，所以考虑使用原函数 locals 空间
             name = self._get_locals()[_cur_pool_name_]
         except:
             name = self._set_pool_by_name()
 
         local = self._get_locals()
-        if _content_ in local:
-            raise "content is already exists. a table_name only use a content in a funciton locals."
+
+        # 为了实现 content 复用，可以直接 x(table_name) & x 就可以拿到上一张表获取的内容
+        if type(content) == X:
+            try:
+                content = local[_content_]
+            except:
+                raise "if you wanna use pre content. pls ensure content already exist."
+        else:
+            local[_content_] = content
 
         col_xpath  = self.pool[name][_col_xpath_]
         node_xpath = self.pool[name][_node_xpath_]
@@ -183,18 +197,16 @@ class X:
         #=============================================================
         '''
         try:
-            # 使用重复代码也非我的意愿，主要是因为 self._get_locals() 这个函数使用时需要非常小心
-            # 这个函数基于函数栈实现，函数层深度不正常时就会出现问题，所以不如就按照最安全的方式调用即可
-            # 也许是懒得去想？
+            # 为了线程安全，所以考虑使用原函数 locals 空间
             name = self._get_locals()[_cur_pool_name_]
         except:
             name = self._set_pool_by_name()
 
         local = self._get_locals()
-        if _content_ in local:
-            raise "content is already exists. one table_name only use one content in a funciton locals."
-
         content = self._get(url)
+
+        # 将 content 存入 locals ，为了线程安全的 content 复用
+        local[_content_] = content
         
         col_xpath  = self.pool[name][_col_xpath_]
         node_xpath = self.pool[name][_node_xpath_]
@@ -207,7 +219,8 @@ class X:
         #=============================================================
         '''
         def f(str):
-            # 这里是对 url里面的query的参数进行quote处理的部分，处理中文输入问题
+            # 这里是对 url里面的 query的参数进行 quote处理的部分，处理中文输入问题
+            # 如果 url的 query里面的 value带有 = 或 & ，可能引发异常
             def _f(m):
                 a = m.group(1)
                 b = parse.quote(m.group(2))
@@ -291,12 +304,24 @@ class X:
             raise "must be init by 'x&html_content' or 'x(name)' before use <<."
 
         if self.pool[name][_col_xpath_toggle_]:
-            assert isinstance(xpath_node,str),"if you use 'x * xpath_node', this xpath_node must be a str"
+            if isinstance(xpath_node,(list,tuple)):
+                assert len(xpath_node) >= 2,"if you use 'x * <list>' or 'x * <tulpe>', you must input a callback function for node."
+                xpath_node,node_func,*_ = xpath_node
+            elif isinstance(xpath_node,str):
+                node_func = None
+            else:
+                raise "node_callback_function type error. it type must be in (str,list,tuple)"
             # 如果输入为字符串类型表明用默认的名字
             # 多线程调用时只有使用 locals 才不会导致名字设置不安全
             assert xpath_node not in self.pool[name][_node_xpath_],"node cannot be repeat."
-            self.pool[name][_node_xpath_][xpath_node] = {}
-            local[_cur_node_] = xpath_node
+            if xpath_node.startswith("jsonpath_"):
+                global jsonpath
+                from jsonpath import jsonpath
+            else:
+                global etree
+                from lxml import etree
+            self.pool[name][_node_xpath_][(xpath_node,node_func)] = {}
+            local[_cur_node_] = (xpath_node,node_func)
 
     def __pow__(self,col_xpath_name):
         '''
@@ -416,19 +441,12 @@ class X:
         return func_locals.f_locals[_locals_name_]
 
     def test(self):
-        # 4 test
-        name = self._get_locals()[_cur_pool_name_]
-        if self.pool[name][_col_xpath_toggle_]:
-            self.pool[name][_col_xpath_toggle_] = False
-        print(name)
+        print('==当前表名=========================================')
+        print(self._get_locals()[_cur_pool_name_])
+        # print('==临时变量=========================================')
+        # print(self._get_locals()) # 临时变量中带有 html_content（复用优化），所以不宜直接打印
+        print('==共享变量=========================================')
         print(self.pool)
-
-        # 临时变量 html_content 和 name 当前使用的池名字
-        print(self._get_locals())
-
-        # 共享变量 col_xpath, pool
-        for i in self.pool[name][_col_xpath_].items():
-            print(i)
 
 
 class DB:
@@ -494,50 +512,97 @@ class DB:
         return p
 
     def _analysis(self):
-        # TODO 添加 json 处理的接口以便进行对 ajax 的处理
-        e = etree.HTML(self.content)
+        # 两种分析提取数据的实现方法
+        # xpath
+        # jsonpath
+        e = None
+        j = None
         p = []
 
+        def _deal_cobk(v,cobk):
+            if v:
+                if isinstance(v,str):
+                    v = v
+                else:
+                    v = v[0]
+                v = str(v)
+                if not v:
+                    v = "NULL"                
+                elif cobk:
+                    v = cobk(v)
+            else:
+                v = "NULL"
+            return v
+
+        # 这里是处理 << 传入的结构
         def _col_xpath():
             q = []
             for col in self.col_xpath:
                 xpath,cobk = self.col_xpath[col]
-                v = e.xpath(xpath)
-                if v:
-                    if isinstance(v,str):
-                        v = v
-                    else:
-                        v = v[0]
-                    if not v:
-                        v = "NULL"
-                    elif cobk:
-                        v = cobk(v)
+                if xpath.startswith("jsonpath_"):
+                    # 这里是用json加载
+                    nonlocal j
+                    if not j:
+                        j = json.loads(self.content)
+                    try:
+                        v = jsonpath(j,xpath[9:])
+                        assert v
+                    except:
+                        raise "jsonpath node loads error. pls check json ajax data."
+                    v = _deal_cobk(v,cobk)
+                    q.append(v.replace('"','""'))
+                    
                 else:
-                    v = "NULL"
-                q.append(v.replace('"','""'))
+                    # 这里以lxml处理
+                    nonlocal e
+                    if e is None:
+                        e = etree.HTML(self.content)
+                    v = e.xpath(xpath)
+                    v = _deal_cobk(v,cobk)
+                    q.append(v.replace('"','""'))
             if q:
                 p.append(q)
 
+        # 这里是处理 * 和 ** 传入的结构
         def _node_xpath():
-            for node_xpath in self.node_xpath:
-                for node in e.xpath(node_xpath):
-                    q = []
-                    for col in self.node_xpath[node_xpath]:
-                        xpath,cobk = self.node_xpath[node_xpath][col]
-                        v = node.xpath(xpath)
-                        if v:
-                            if isinstance(v,str):
-                                v = v
-                            else:
-                                v = v[0]
-                            if not v:
-                                v = "NULL"
-                            elif cobk:
-                                v = cobk(v)
-                        else:
-                            v = "NULL"
-                        q.append(v.replace('"','""'))
-                    p.append(q)
+            for node_xpath,node_cobk in self.node_xpath:
+                if node_xpath.startswith("jsonpath_"):
+                    # 这里是用json加载
+                    nonlocal j
+                    if not j:
+                        j = json.loads(self.content)
+                    nd = node_xpath[9:]
+                    try:
+                        node = jsonpath(j,nd)
+                        assert node
+                    except:
+                        raise "jsonpath node loads error. pls check json ajax data."
+                    if node_cobk:
+                        next_node = node_cobk(node)
+
+                    for i in next_node:
+                        if type(i)==tuple: _node = list(i)
+                        q = []
+                        for col in self.node_xpath[(node_xpath,node_cobk)]:
+                            jpath,cobk = self.node_xpath[(node_xpath,node_cobk)][col]
+                            v = jsonpath(_node,jpath)
+                            v = _deal_cobk(v,cobk)
+                            q.append(v.replace('"','""'))
+                        p.append(q)
+                    
+                else:
+                    # 这里以lxml处理
+                    nonlocal e
+                    if e is None:
+                        e = etree.HTML(self.content)
+                    for node in e.xpath(node_xpath):
+                        q = []
+                        for col in self.node_xpath[(node_xpath,node_cobk)]:
+                            xpath,cobk = self.node_xpath[(node_xpath,node_cobk)][col]
+                            v = node.xpath(xpath)
+                            v = _deal_cobk(v,cobk)
+                            q.append(v.replace('"','""'))
+                        p.append(q)
 
         _col_xpath()
         _node_xpath()

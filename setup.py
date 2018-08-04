@@ -4,13 +4,15 @@ import sys
   
 setup(  
     name="vspider",
-    version="0.0.3",
+    version="0.0.4",
     author="vilame",
     author_email="opaquism@hotmail.com",
     description="minimalist crawling framework.",
     long_description="""
 Crawling framework for storing text data via sqlite3.
 =====================================================
+
+Support for xpath and jsonpath syntax
 
 sqlite3: table_name: some, table_col: col_0, col_1
 ==================================================

@@ -26,6 +26,8 @@ def some(url):
     # 然后以各列的 xpath 解析 content 获取录入数据
     # 且到这里，some 表和 foo 表以及表收集的数据互不干扰
 
+    # 为了 content 的复用
+    # 如果你想使用上一张表获取的 content 请直接用 x(table_name) & x 即可
 
     import requests
     content = requests.get(url).content
@@ -51,39 +53,39 @@ url = 'http://www.baidu.com/s?wd=翻译'
 for i in range(5):
     some(url)
 
-##@vthread.pool(3)
-##def some2(url):
-##    x @ url
-##    x * '//*[@class="result c-container "]'
-##    x ** 'string(./h3/a)'
-##    x ** 'string(./h3/a/@href)'
-##    x * '//*[@class="result-op c-container"]'
-##    x ** 'string(./h3/a)'
-##    x ** 'string(./h3/a/@href)'
-##
-##url = 'http://www.baidu.com/s?wd=翻译'
-##for i in range(5):
-##    some2(url)
+@vthread.pool(3)
+def some2(url):
+    x @ url
+    x * '//*[@class="result c-container "]'
+    x ** 'string(./h3/a)'
+    x ** 'string(./h3/a/@href)'
+    x * '//*[@class="result-op c-container"]'
+    x ** 'string(./h3/a)'
+    x ** 'string(./h3/a/@href)'
+
+url = 'http://www.baidu.com/s?wd=翻译'
+for i in range(5):
+    some2(url)
 
 
 
 
-##def some3(url):
-##    print(url)
-##    x("真臭") @ url
-##    x * '//*[contains(@class,"c-container")]'
-##    x ** ("标题",'string(./h3/a)')
-##    x ** ("链接",'string(./h3/a/@href)',lambda i:i[26:]) # 测试爬去数据的后续处理
-##    x ** ("简介",'string(./div)')
-##
-##    if url.endswith("=0"):
-##        x("真香") @ url
-##        x << 'string(//*[@id="1"]/h3/a)'
-##        x << 'string(//*[@id="2"]/h3/a)'
-##
-##for i in range(2):
-##    url = f"https://www.baidu.com/s?wd=你好&pn={i*10}"
-##    some3(url)
+def some3(url):
+    print(url)
+    x("真臭") @ url
+    x * '//*[contains(@class,"c-container")]'
+    x ** ("标题",'string(./h3/a)')
+    x ** ("链接",'string(./h3/a/@href)',lambda i:i[26:]) # 测试爬去数据的后续处理
+    x ** ("简介",'string(./div)')
+
+    if url.endswith("=0"):
+        x("真香的菜") @ url
+        x << 'string(//*[@id="1"]/h3/a)'
+        x << 'string(//*[@id="2"]/h3/a)'
+
+for i in range(2):
+    url = f"https://www.baidu.com/s?wd=你好&pn={i*10}"
+    some3(url)
 
 
 
