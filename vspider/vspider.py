@@ -311,12 +311,12 @@ class X:
                 col   = temp
                 xpath = col_xpath_name
                 cobk  = lambda i:i.strip()
-                if xpath.startswith("jsonpath_"):
-                    global jsonpath
-                    from jsonpath import jsonpath
-                else:
-                    global etree
-                    from lxml import etree
+            if xpath.startswith("jsonpath_"):
+                global jsonpath
+                from jsonpath import jsonpath
+            else:
+                global etree
+                from lxml import etree
 
             if col not in self.pool[name][_col_xpath_]:
                 self.pool[name][_col_xpath_][col] = (xpath,cobk)
