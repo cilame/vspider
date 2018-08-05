@@ -4,6 +4,8 @@ import threading
 import sqlite3
 import re
 import json
+import hmac
+import time
 from urllib import request,parse
 
 # 使用前最好预装 lxml 或 jsonpath
@@ -38,6 +40,12 @@ _col_xpath_         = "_col_xpath_"
 _node_xpath_        = "_node_xpath_"
 _db_create_         = "_db_create_"
 _col_types_         = "_col_types_"
+
+#==========#
+# 函数库名 #
+#==========#
+_db_ = "x.db"
+_salt_ = b"spark1ehorse"
 
 class X:
     '''
@@ -179,6 +187,8 @@ class X:
         if type(content) == X:
             try:
                 content = local[_content_]
+                if content == X:
+                    return 
             except:
                 raise "if you wanna use pre content. pls ensure content already exist."
         else:
@@ -219,6 +229,7 @@ class X:
             # 调用过滤对象的方法，如果过滤池里面不存在url则返回url，否则返回空，退出函数
             url = filter_pool.get_url_by_pool(url)
             if not url:
+                local[_content_] = X
                 return
 
         content = self._get(url)
@@ -477,7 +488,7 @@ class X:
 
         # 一个函数只生成一个过滤池，没有提前配置的话会默认会生成一个函数名字的过滤对象
         # 这里不直接用 __or__ 是因为 inspect.stack() 的特殊性
-        if _locals_name_ not in func_locals.f_locals[_locals_name_]:
+        if _cur_filter_ not in func_locals.f_locals[_locals_name_]:
             filtername = inspect.stack()[2][3]
             if _filterpool_ not in self.pool:
                 self.pool[_filterpool_] = {}
@@ -511,7 +522,7 @@ class X:
 
 
 class DB:
-    def __init__(self,table_name,content,col_xpath,node_xpath,dbname="x.db"):
+    def __init__(self,table_name,content,col_xpath,node_xpath,dbname=_db_):
         self.name = dbname
         self.conn = sqlite3.connect(self.name) # 数据库接口处，默认使用 sqlite3
         self.cursor = self.conn.cursor()
@@ -701,6 +712,7 @@ class DB:
         self.insert(self._analysis())
         self.conn.close()
 
+
 class filterpool:
     '''
     #=============================================================
@@ -710,16 +722,116 @@ class filterpool:
     # 初始化时会通过这个对象内的name从数据库中获取url持久化存储的过滤池
     #=============================================================
     '''
-    def __init__(self, name):
-        # TODO 这里需要考虑线程初始化的情况，如果从数据库里面调用相应的表格内容获取，url过滤池
-        self.name = name
+    def __init__(self,name):
+        self.s = set()
+        self.name = "_filter_" + name
+        self.starttime = time.time()
+        self.resettime = time.time()
+        self.timelimit = 0
+        
+        self.create_sql = '''create table if not exists %s
+                            (id integer primary key autoincrement,
+                            url char(32) unique)''' % self.name
+        self.select_sql = '''select url from %s order by id desc limit 0,{}''' % self.name
+        self.insert_sql = '''insert into %s values (NULL,'{}')''' % self.name
 
-    def get_url_by_pool(self, url):
-        # TODO 这里要考虑线程安全，要考虑到多线程同时调用这个类实例的函数的情况
-        return url
+        try:
+            conn = sqlite3.connect(_db_)
+            conn.execute(self.create_sql)
+        finally:
+            conn.close()
+
+    def get_url_by_pool(self,url):
+        re_url = url
+
+        if isinstance(url,str):
+            url = url.encode()
+
+        assert isinstance(url,bytes),"url type must be in (string, bytes)."
+        url = hmac.new(_salt_,url,'md5').hexdigest()
+        
+        if url in self.s:
+            return
+        else:
+            v = time.time() - self.resettime
+            if v >= self.timelimit:
+                self.resettime = time.time()
+                self.timelimit = self._update_timelimit(20)
+                self._update_localset(4000) # 默认取四千数量作为缓冲池
+            if self.insert(url):
+                return re_url
+
+    def insert(self,u):
+        sql = self.insert_sql.format(u)
+        try:
+            conn = sqlite3.connect(_db_)
+            conn.execute(sql)
+            conn.commit()
+            return True
+        except:
+            return False
+        finally:
+            conn.close()
+
+    def _update_localset(self,n):
+        sql = self.select_sql.format(n)
+        try:
+            conn = sqlite3.connect(_db_)
+            v = conn.execute(sql)
+            v = v.fetchall()
+            if v:
+                self.s = set(list(zip(*v))[0]) # 默认使用最新的n条数据作为缓存使用
+        finally:
+            conn.close()
+        return v
+
+    def _update_timelimit(self,k):
+        v = (time.time() - self.starttime)**.5 * k # 渐增的重新加载内存过滤池的时间间隔
+        v = v if v <= 3600 else 3600
+        return v
+
+
+
+
+
+
+
+
+
+
+
 
 
 # 池选择器，全局唯一
 x = X()
 
 sys.modules[_import_module].x = x
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

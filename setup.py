@@ -4,7 +4,7 @@ import sys
   
 setup(  
     name="vspider",
-    version="0.0.6",
+    version="0.0.7",
     author="vilame",
     author_email="opaquism@hotmail.com",
     description="minimalist crawling framework.",

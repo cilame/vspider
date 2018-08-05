@@ -4,6 +4,8 @@ import vspider
 # vspider 是一个使用 sqlite 对轻量级文本进行数据收集的爬虫库
 # 线程安全，配合 vthread 相当方便
 
+f = lambda i:i[:20]
+
 @vthread.pool(3) # 开三个线程池
 def some(url):
     print(url)
@@ -15,7 +17,8 @@ def some(url):
     # 所有列名为 col_0, col_1 的表
     # 每次执行该函数就会用默认的函数对 url 解析获取其content
     # 然后以各列的 xpath 解析 content 获取录入数据
-    
+
+    x | "foo"
     x("foo") @ url
     x << ("col1",'//*[@id="1"]/h3/a[1]/@href')
     x << ("col2",'//*[@id="2"]/h3/a/@href')
@@ -33,7 +36,7 @@ def some(url):
     content = requests.get(url).content
     
     x("asdf") & content
-    x << ("col1",'//*[@id="1"]/h3/a[1]/@href',lambda i:i[:20])
+    x << ("col1",'//*[@id="1"]/h3/a[1]/@href',f)
     x << ("col0",'//*[@id="2"]/h3/a/@href')
     # 由于 vspider 自带的网页 html_content 获取的功能不够强大
     # 有时你需要通过别的库获取 html_content 然后通过 & 传入即可
@@ -52,7 +55,7 @@ def some(url):
 
 url = 'http://www.baidu.com/s?wd=翻译'
 for i in range(5):
-    some(url)
+    some(url);some(url)
 
 @vthread.pool(3)
 def some2(url):
