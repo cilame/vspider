@@ -94,6 +94,23 @@ for i in range(5):
 
 
 
+import vspider,vthread
+
+@vthread.pool(10)
+def some4(url):
+    print(url)
+    x("真可怕") @ url
+    x * '//*[contains(@class,"c-container")]'
+    x ** ("标题",'string(./h3/a)')
+    x ** ("链接",'string(./h3/a/@href)',lambda i:i[26:]) # 测试xpath获取数据的后续处理
+    x ** ("简介",'string(./div)')
+    x + ('//*[@id="page"]/a/@href',lambda i:'&'.join(i.split('&')[:2]))
+
+# 自动翻页设计，将其设计为迭代器
+# 重载函数 + ，如果能从content里面解析出下页就将其加入迭代器，迭代器就自动将其迭代出来
+u = "https://www.baidu.com/s?wd=你好&pn=0"
+for i in x.start_url(u):
+    some4(i)
 
 
 

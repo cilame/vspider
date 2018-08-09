@@ -6,10 +6,18 @@ import re
 import json
 import hmac
 import time
+import queue
 from urllib import request,parse
+from collections import Iterable
 
 # 使用前最好预装 lxml 或 jsonpath
 # 因为目前仅支持这两种解析方式
+
+try:
+    from jsonpath import jsonpath
+    from lxml import etree
+except:
+    from lxml import etree
 
 _import_module = "__main__"
 
@@ -30,6 +38,9 @@ _cur_node_      = "0_cur_node_"
 _defualt_col_   = "0_defualt_col_"
 _single_col_    = "0_single_col_"
 _node_col_      = "0_node_col_"
+# 用来处理 x.start_url 的线程安全的参数名字
+_queue_lock_    = "0_queue_lock_"
+
 
 #============#
 # 公共变量名 #
@@ -40,6 +51,9 @@ _col_xpath_         = "_col_xpath_"
 _node_xpath_        = "_node_xpath_"
 _db_create_         = "_db_create_"
 _col_types_         = "_col_types_"
+_next_url_pool_     = "_next_url_pool_"
+_domain_            = "_domain_"
+
 
 #==========#
 # 函数库名 #
@@ -47,6 +61,11 @@ _col_types_         = "_col_types_"
 _db_ = "x.db"
 _salt_ = b"spark1ehorse"
 
+
+
+#========#
+# 选择器 #
+#========#
 class X:
     '''
     #=============================================================
@@ -61,7 +80,9 @@ class X:
     # 该库本质上走接口极简路线，所以就只会考虑在主线程里面的实现
     # 为了极简主义的追求，用了非常多的黑魔法，导致
     # 不在 __name__ == "__main__" 下的脚本里不能直接使用 x 这个魔法实例
-    # 若是在非 main 脚本里面使用，请使用 vspider.X() 去产生一个新的实例
+    # *目前这里由于DB类内部方法的限制，暂时不支持使用非 main 环境使用
+    # *后续可能补充在非 main 脚本里面使用，能使用 vspider.X() 去产生一个新的实例实现
+    # *目前不行
     #
     # 因为引入该库之后该库会在 "__main__" 环境里面会产生一个 x 的全局变量
     # 所以你应该避免使用 x 作为为变量的名字
@@ -190,7 +211,7 @@ class X:
                 if content == X:
                     return 
             except:
-                raise "if you wanna use pre content. pls ensure content already exist."
+                raise "if you wanna use pre content. pls ensure content already exist or already get by url."
         else:
             local[_content_] = content
 
@@ -224,7 +245,7 @@ class X:
         except:
             raise "get filter pool error."
 
-        # 过滤对象的获取，有则使用，没有则不使用
+        # 过滤对象的获取，没有则不使用。一般只有你主动关闭才会没有，关闭方法: x | x
         if filter_pool:
             # 调用过滤对象的方法，如果过滤池里面不存在url则返回url，否则返回空，退出函数
             url = filter_pool.get_url_by_pool(url)
@@ -232,7 +253,13 @@ class X:
                 local[_content_] = X
                 return
 
-        content = self._get(url)
+        try:
+            content = self._get(url)
+        except:
+            u = url if len(url) < 60 else url[:57] + '...'
+            print('err url:',u)
+            local[_content_] = X
+            return 
 
         # 将 content 存入 locals ，为了线程安全的 content 复用
         local[_content_] = content
@@ -240,6 +267,129 @@ class X:
         col_xpath  = self.pool[name][_col_xpath_]
         node_xpath = self.pool[name][_node_xpath_]
         local[_db_inserter_] = DB(name,content,col_xpath,node_xpath)
+
+
+    def _assemble_http(self,url):
+        '''
+        tools function for __gt__ .
+        '''
+        return url if url.startswith('http') else self.pool[_domain_] + url
+
+    def __add__(self,xpath):
+        '''
+        #=============================================================
+        # 对 > 进行重载
+        #
+        # 收集一个解析方式，通过这个解析方式来获取 next url 然后传入 self._iter_url
+        # 如果没有使用 x.start_url 方法的话，那么这个方法将无效
+        #=============================================================
+        '''
+        # 通过 content 获取 next url，将 next url 放入迭代队列
+        if hasattr(self,'_iter_url'):
+
+            # 获取局部变量地址
+            local = self._get_locals()
+
+            # 为了扩展 start_url 接口使用的参数 _queue_lock_
+            if _queue_lock_ not in local:
+                local[_queue_lock_] = True
+
+            try:
+                content = local[_content_]
+                if content == X:
+                    # 关闭锁开关，一个函数只能操作 queue_lock 锁一次
+                    if local[_queue_lock_]:
+                        self._queue_lock.get()
+                        local[_queue_lock_] = False
+                    return 
+            except:
+                raise "if you wanna use pre content. pls ensure content already exist or already get by url."
+
+            # 这里需要判断是否有 next url 解析过滤器，有的话解析
+            # 解析出来的 urls 去重后传入 self._iter_url 即可
+            if _next_url_pool_ not in self.pool:
+                raise 'If you want to use the "next_url" parser, use it with the "x.start_url(<url>)" iterator'
+
+            # 开始分析结构
+            if isinstance(xpath,str):
+                _xpath = xpath
+                _xfunc = self._assemble_http
+            elif isinstance(xpath,(list,tuple)):
+                assert len(xpath) >= 2
+                _xpath = xpath[0]
+                _xfunc = lambda i:xpath[1](self._assemble_http(i))
+            else:
+                raise "xpath type must in (str,list,tuple)."
+
+            # 开始解析结构
+            if _xpath.startswith('jsonpath_'):
+                v = jsonpath(json.load(content),_xpath)
+            else:
+                v = etree.HTML(content).xpath(_xpath)
+
+            # 函数过滤，然后用全局池去重
+            ls = list(map(_xfunc,v))
+            ls = self.pool[_next_url_pool_].get_urls_by_pool(ls)
+            for i in ls:
+                self._iter_url.put(i)
+            
+
+            # 关闭锁开关，一个函数只能操作 queue_lock 锁一次
+            if local[_queue_lock_]:
+                self._queue_lock.get()
+                local[_queue_lock_] = False
+
+
+    def start_url(self,ls):
+        '''
+        #=============================================================
+        # 通过生成迭代器，让迭代器不停迭代出获取到的新的页面地址
+        #
+        # 也就是将迭代器同解析器一体化，函数内部解析出 next url迭代出来
+        # 以一种非常类似以往直接传入所有可能的url的直接迭代方式实现
+        # 也算是一种功能代码压缩的方法
+        #
+        #     for url in x.start_url("http://url1"):
+        #         crawl(url)
+        #
+        #=============================================================
+        '''
+        if not hasattr(self,'_iter_url'):
+            self._iter_url = queue.Queue()
+            self._queue_lock = queue.Queue()
+        else:
+            raise "The start_url function can only be used once."
+        
+        if isinstance(ls,str):
+            self._iter_url.put(ls)
+            u = ls
+        elif isinstance(ls,(list,tuple,Iterable)):
+            for idx,i in enumerate(ls):
+                if idx==0:
+                    u = i
+                self._iter_url.put(i)
+        else:
+            raise "start_url type error. type must in (str,list,tuple,Iterable)."
+
+
+        # 创建解析过滤池表，这个表只是为了在解析next url的时候去重用的
+        # 如果解析不去重，那么其他过滤池的调用次数就可能呈几何上升
+        # 这里就是就是为了不让普通过滤池调用过多的一种优化
+        if _next_url_pool_ not in self.pool:
+            self.pool[_next_url_pool_] = filterpool('temp_urls_')
+            self.pool[_domain_] = '://'.join(parse.urlparse(u)[:2])
+
+        self._queue_lock.put("V") # 因为不能用empty去判断，所以需要先put进一个标记
+        while True:
+            try:
+                yield self._iter_url.get(timeout=.5)
+                self._queue_lock.put("V")
+            except:
+                if self._queue_lock.qsize() == 1: # 这里不能用empty判断
+                    raise StopIteration
+                else:
+                    time.sleep(1)
+
 
     def _get(self,url):
         '''
@@ -252,7 +402,7 @@ class X:
             # 如果 url的 query里面的 value带有 = 或 & ，可能引发异常
             def _f(m):
                 a = m.group(1)
-                b = parse.quote(m.group(2))
+                b = parse.quote(parse.unquote(m.group(2)))
                 if a.strip() or b.strip():
                     return a+'='+b
                 else:
@@ -281,7 +431,7 @@ class X:
         try:
             name = local[_cur_pool_name_]
         except:
-            raise "must be init by 'x&html_content' or 'x(name)' before use <<."
+            raise "must be init by 'x&html_content' or 'x(name)' or 'x @ url' before use <<."
 
         if self.pool[name][_col_xpath_toggle_]:
             if isinstance(col_xpath_name,(tuple,list)):
@@ -311,12 +461,6 @@ class X:
                 col   = temp
                 xpath = col_xpath_name
                 cobk  = lambda i:i.strip()
-            if xpath.startswith("jsonpath_"):
-                global jsonpath
-                from jsonpath import jsonpath
-            else:
-                global etree
-                from lxml import etree
 
             if col not in self.pool[name][_col_xpath_]:
                 self.pool[name][_col_xpath_][col] = (xpath,cobk)
@@ -336,7 +480,7 @@ class X:
         try:
             name = local[_cur_pool_name_]
         except:
-            raise "must be init by 'x&html_content' or 'x(name)' before use <<."
+            raise "must be init by 'x&html_content' or 'x(name)' or 'x @ url' before use <<."
 
         if self.pool[name][_col_xpath_toggle_]:
             if isinstance(xpath_node,(list,tuple)):
@@ -346,13 +490,6 @@ class X:
                 node_func = None
             else:
                 raise "node_callback_function type error. it type must be in (str,list,tuple)"
-
-            if xpath_node.startswith("jsonpath_"):
-                global jsonpath
-                from jsonpath import jsonpath
-            else:
-                global etree
-                from lxml import etree
 
             local[_cur_node_] = (xpath_node,node_func)
             
@@ -391,7 +528,7 @@ class X:
         try:
             name = local[_cur_pool_name_]
         except:
-            raise "must be init by 'x&html_content' or 'x(name)' before use <<."
+            raise "must be init by 'x&html_content' or 'x(name)' or 'x @ url' before use <<."
 
         if self.pool[name][_col_xpath_toggle_]:
             node = local[_cur_node_]
@@ -512,7 +649,8 @@ class X:
         func_locals = inspect.stack()[2][0]
         return func_locals.f_locals[_locals_name_]
 
-    def test(self):
+
+    def _test(self):
         print('==当前表名=========================================')
         print(self._get_locals()[_cur_pool_name_])
         # print('==临时变量=========================================')
@@ -521,6 +659,9 @@ class X:
         print(self.pool)
 
 
+#============#
+# 数据库连接 #
+#============#
 class DB:
     def __init__(self,table_name,content,col_xpath,node_xpath,dbname=_db_):
         self.name = dbname
@@ -692,27 +833,34 @@ class DB:
     def __del__(self):
         if x.pool[self.table_name][_col_xpath_toggle_]:
             x.pool[self.table_name][_col_xpath_toggle_] = False
-        
-        # 创建列名和列类型方法
-        if not x.pool[self.table_name][_col_types_]: # 减少重复执行 self._mk_col_types 函数
-            x.pool[self.table_name][_col_types_] = self._mk_col_types()
-        col_types = x.pool[self.table_name][_col_types_]
 
-        # 创建数据库，通过 col_types。
-        if x.pool[self.table_name][_db_create_]: # 减少重复执行 self.create 函数
-            try:
-                self.create(col_types)
-                x.pool[self.table_name][_db_create_] = False
-            except Exception as err:
-                print(err)
-                raise "create error."
+        try:
+            # 创建列名和列类型方法
+            if not x.pool[self.table_name][_col_types_]: # 减少重复执行 self._mk_col_types 函数
+                x.pool[self.table_name][_col_types_] = self._mk_col_types()
+            col_types = x.pool[self.table_name][_col_types_]
 
-        # 插入数据库
-        # 目前只能通过lxml在content查找，后续拓展ajax数据
-        self.insert(self._analysis())
-        self.conn.close()
+            # 创建数据库，通过 col_types。
+            if x.pool[self.table_name][_db_create_]: # 减少重复执行 self.create 函数
+                try:
+                    self.create(col_types)
+                    x.pool[self.table_name][_db_create_] = False
+                except Exception as err:
+                    print(err)
+                    raise "create error."
+
+            # 插入数据库
+            # 目前有两种方法 xpath 和 jsonpath
+            self.insert(self._analysis())
+        finally:
+            # 目前用的对象还是x，也就是脚本目前只能在main环境下面才可以执行
+            self.conn.close()
+            
 
 
+#========#
+# 过滤池 #
+#========#
 class filterpool:
     '''
     #=============================================================
@@ -757,9 +905,17 @@ class filterpool:
             if v >= self.timelimit:
                 self.resettime = time.time()
                 self.timelimit = self._update_timelimit(20)
-                self._update_localset(4000) # 默认取四千数量作为缓冲池
+                self._update_localset(4000) # 默认取四千数量作为内存缓冲池
             if self.insert(url):
                 return re_url
+
+    def get_urls_by_pool(self,urls):
+        p = []
+        for url in urls:
+            v = self.get_url_by_pool(url)
+            if v:
+                p.append(v)
+        return p
 
     def insert(self,u):
         sql = self.insert_sql.format(u)
@@ -806,29 +962,6 @@ class filterpool:
 x = X()
 
 sys.modules[_import_module].x = x
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
