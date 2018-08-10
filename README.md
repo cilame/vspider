@@ -155,7 +155,7 @@ for i in range(10):
 
 - ##### 极简的 next_url 解析接口，实现自动翻页的功能
 
-```
+```python
 import vspider,vthread
 
 @vthread.pool(10)
