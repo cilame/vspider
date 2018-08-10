@@ -322,7 +322,7 @@ class X:
                 raise "xpath type must in (str,list,tuple)."
 
             # 开始解析结构
-            if _xpath.startswith('jsonpath_'):
+            if _xpath.startswith('$'):
                 v = jsonpath(json.load(content),_xpath)
             else:
                 v = etree.HTML(content).xpath(_xpath)
@@ -753,13 +753,13 @@ class DB:
             q = []
             for col in self.col_xpath:
                 xpath,cobk = self.col_xpath[col]
-                if xpath.startswith("jsonpath_"):
+                if xpath.startswith("$"):
                     # 这里是用json加载
                     nonlocal j
                     if not j:
                         j = json.loads(self.content)
                     try:
-                        v = jsonpath(j,xpath[9:])
+                        v = jsonpath(j,xpath)
                         assert v
                     except Exception as err:
                         print(err)
@@ -781,12 +781,12 @@ class DB:
         # 这里是处理 * 和 ** 传入的结构
         def _node_xpath():
             for node_xpath,node_cobk in self.node_xpath:
-                if node_xpath.startswith("jsonpath_"):
+                if node_xpath.startswith("$"):
                     # 这里是用json加载
                     nonlocal j
                     if not j:
                         j = json.loads(self.content)
-                    nd = node_xpath[9:]
+                    nd = node_xpath
                     try:
                         node = jsonpath(j,nd)
                         assert node
